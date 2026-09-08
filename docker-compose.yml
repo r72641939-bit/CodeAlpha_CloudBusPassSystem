@@ -1,0 +1,53 @@
+version: "3.9"
+
+# Spins up a local PostgreSQL database alongside the backend, so you can
+# run this whole project with a single command and no manual database
+# setup (no Neon/Supabase account needed for local development).
+#
+# Usage:
+#   1. cd backend && cp .env.example .env   (fill in ENCRYPTION_KEY-style
+#      values as needed; SMTP_* is optional - leave blank to skip email)
+#   2. From the project root: docker compose up --build
+#   3. API available at http://localhost:8000, docs at /docs
+#
+# The `environment.DATABASE_URL` below intentionally overrides whatever
+# is in backend/.env, pointing the backend at the `db` service instead -
+# so the same .env file works whether you run locally with `uvicorn` or
+# via Docker Compose.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: bus_pass_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - bus_pass_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      # Overrides whatever DATABASE_URL is in .env - always points at
+      # the `db` service above when running via Docker Compose.
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/bus_pass_db
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  bus_pass_db_data:

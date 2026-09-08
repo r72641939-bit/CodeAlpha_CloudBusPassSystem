@@ -1,0 +1,70 @@
+# Continuous Integration for the Cloud-Based Bus Pass System.
+#
+# Runs on every push and pull request against main:
+#   1. Spins up a REAL, disposable PostgreSQL database (a GitHub-hosted
+#      service container - not mocked, not SQLite standing in for it).
+#   2. Installs dependencies and runs the full test suite against it,
+#      including the actual 10-thread concurrency test with real
+#      `SELECT ... FOR UPDATE` row locking - the same test that proved
+#      seat-booking safety when run locally.
+#   3. Separately verifies the Docker image actually builds.
+#
+# A green checkmark on this repo means the tests genuinely ran and
+# passed on a fresh database, not just that the code looks right.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: bus_pass_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/bus_pass_db
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Run the full test suite
+        working-directory: backend
+        run: pytest tests/ -v
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Build the Docker image
+        working-directory: backend
+        run: docker build -t cloudbus-backend .

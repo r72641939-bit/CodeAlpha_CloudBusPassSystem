@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CloudBus — Book Your Seat</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #F7F7F5;
+    --card: #FFFFFF;
+    --border: #ECECE8;
+    --text: #1C1D21;
+    --text-dim: #6E7078;
+    --navy: #243B7A;
+    --navy-dim: #E9EDF7;
+    --accent: #FF6B4A;
+    --accent-dim: #FFF0EC;
+    --available: #F1F2F4;
+    --available-hover: #E4E7EC;
+    --booked: #DADCE0;
+    --success: #1E9E6B;
+    --success-bg: #E9F8F1;
+    --danger: #E0483E;
+    --danger-bg: #FDECEA;
+    --shadow: 0 2px 10px rgba(20,22,30,0.05), 0 1px 2px rgba(20,22,30,0.04);
+  }
+  *{ box-sizing: border-box; }
+  body{
+    margin:0; background: var(--bg); color: var(--text);
+    font-family: 'Plus Jakarta Sans', sans-serif; min-height:100vh;
+  }
+
+  header{
+    padding: 22px 32px; display:flex; justify-content:space-between; align-items:center;
+    background: var(--card); border-bottom: 1px solid var(--border);
+  }
+  .brand{ display:flex; align-items:center; gap: 10px; }
+  .brand-mark{
+    width: 34px; height: 34px; border-radius: 9px; background: var(--navy);
+    display:flex; align-items:center; justify-content:center; color:#fff; font-weight:800; font-size: 0.95rem;
+  }
+  .brand h1{ font-size: 1.15rem; font-weight: 800; margin:0; letter-spacing: -0.01em; }
+  .brand p{ margin:0; font-size: 0.72rem; color: var(--text-dim); }
+
+  .stats-row{ display:flex; gap: 26px; }
+  .stat{ text-align:right; }
+  .stat .num{ font-size: 1.25rem; font-weight: 800; line-height:1; color: var(--navy); }
+  .stat .label{ color: var(--text-dim); font-size: 0.68rem; margin-top: 3px; }
+
+  main{ max-width: 1100px; margin: 0 auto; padding: 32px 24px 60px; }
+
+  .section-title{ font-size: 1.05rem; font-weight: 700; margin: 0 0 16px; }
+
+  .routes-grid{ display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; margin-bottom: 40px; }
+  .route-card{
+    background: var(--card); border: 2px solid var(--border); border-radius: 14px;
+    padding: 18px 20px; cursor:pointer; transition: all 0.18s ease; box-shadow: var(--shadow);
+  }
+  .route-card:hover{ border-color: var(--navy); transform: translateY(-2px); }
+  .route-card.selected{ border-color: var(--accent); background: var(--accent-dim); }
+  .route-path{ font-weight: 700; font-size: 1.02rem; display:flex; align-items:center; gap:8px; }
+  .route-path .arrow{ color: var(--text-dim); font-weight:400; }
+  .route-meta{ display:flex; justify-content:space-between; align-items:flex-end; margin-top: 12px; }
+  .route-time{ font-size: 0.78rem; color: var(--text-dim); }
+  .route-price{ font-size: 1.15rem; font-weight: 800; color: var(--navy); }
+  .route-operator{ font-size: 0.7rem; color: var(--text-dim); margin-top: 2px; }
+
+  .booking-panel{
+    background: var(--card); border-radius: 16px; border: 1px solid var(--border);
+    box-shadow: var(--shadow); padding: 28px; display:none;
+  }
+  .booking-panel.show{ display:block; animation: fadeSlideIn 0.35s ease; }
+  @keyframes fadeSlideIn{ from{ opacity:0; transform: translateY(10px); } to{ opacity:1; transform:translateY(0); } }
+
+  .booking-panel-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom: 22px; flex-wrap:wrap; gap:10px; }
+  .booking-panel-head h2{ font-size: 1.05rem; margin:0; }
+  .legend{ display:flex; gap: 16px; font-size: 0.75rem; color: var(--text-dim); }
+  .legend span{ display:inline-flex; align-items:center; gap: 6px; }
+  .legend-dot{ width: 12px; height:12px; border-radius: 4px; display:inline-block; }
+  .legend-dot.available{ background: var(--available); border: 1px solid var(--border); }
+  .legend-dot.selected{ background: var(--accent); }
+  .legend-dot.booked{ background: var(--booked); }
+
+  .bus-frame{
+    background: linear-gradient(180deg, #FBFBFA, #F3F3F1); border-radius: 20px;
+    padding: 24px 20px; border: 1px solid var(--border);
+  }
+  .seat-grid{
+    display:grid; grid-template-columns: repeat(5, 1fr); gap: 10px; max-width: 340px; margin: 0 auto;
+  }
+  .seat{
+    aspect-ratio: 1; border-radius: 8px; background: var(--available);
+    border: 1px solid var(--border); cursor:pointer; display:flex; align-items:center; justify-content:center;
+    font-size: 0.72rem; font-weight: 700; color: var(--text-dim); transition: all 0.15s ease; user-select:none;
+  }
+  .seat:hover:not(.booked){ background: var(--available-hover); transform: scale(1.05); }
+  .seat.aisle-gap{ background: transparent; border: none; cursor:default; }
+  .seat.selected{ background: var(--accent); color: #fff; border-color: var(--accent); animation: seatPop 0.25s ease; }
+  @keyframes seatPop{ 0%{ transform: scale(0.85); } 60%{ transform: scale(1.12); } 100%{ transform: scale(1); } }
+  .seat.booked{ background: var(--booked); color: #9A9CA3; cursor:not-allowed; }
+
+  .booking-form{ margin-top: 24px; display:flex; gap: 12px; flex-wrap:wrap; align-items:flex-end; }
+  .booking-form .field{ flex: 1; min-width: 200px; }
+  .booking-form label{ display:block; font-size: 0.75rem; color: var(--text-dim); margin-bottom: 6px; }
+  .booking-form input{
+    width:100%; padding: 11px 13px; border-radius: 9px; border: 1.5px solid var(--border);
+    font-family: 'Plus Jakarta Sans', sans-serif; font-size: 0.9rem; outline:none; transition: border-color 0.15s ease;
+  }
+  .booking-form input:focus{ border-color: var(--navy); }
+  .confirm-btn{
+    background: var(--accent); color: #fff; border:none; border-radius: 9px;
+    padding: 12px 22px; font-weight: 700; font-size: 0.88rem; cursor:pointer; white-space:nowrap;
+  }
+  .confirm-btn:hover{ opacity: 0.9; }
+  .confirm-btn:disabled{ opacity: 0.45; cursor:not-allowed; }
+
+  .result-banner{
+    margin-top: 18px; padding: 16px 18px; border-radius: 12px; display:none; align-items:center; gap: 14px;
+  }
+  .result-banner.show{ display:flex; animation: fadeSlideIn 0.3s ease; }
+  .result-banner.ok{ background: var(--success-bg); }
+  .result-banner.error{ background: var(--danger-bg); }
+  .result-icon{
+    width: 38px; height: 38px; border-radius: 50%; display:flex; align-items:center; justify-content:center;
+    font-size: 1.1rem; flex-shrink:0;
+  }
+  .result-banner.ok .result-icon{ background: var(--success); color:#fff; }
+  .result-banner.error .result-icon{ background: var(--danger); color:#fff; }
+  .result-text strong{ display:block; font-size: 0.92rem; margin-bottom: 2px; }
+  .result-text span{ font-size: 0.8rem; color: var(--text-dim); }
+  .result-banner.ok .result-text strong{ color: var(--success); }
+  .result-banner.error .result-text strong{ color: var(--danger); }
+
+  .empty-state{ color: var(--text-dim); font-size: 0.9rem; padding: 40px; text-align:center; }
+
+  footer{ text-align:center; padding: 24px 20px 60px; color: var(--text-dim); font-size: 0.74rem; }
+  .credit-badge{
+    position: fixed; bottom: 16px; right: 16px; background: var(--card); border: 1px solid var(--border);
+    border-radius: 999px; padding: 7px 14px; font-size: 0.72rem; color: var(--text-dim);
+    box-shadow: var(--shadow); z-index: 10;
+  }
+  .credit-badge strong{ color: var(--navy); font-weight: 700; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="brand-mark">CB</div>
+    <div>
+      <h1>CloudBus</h1>
+      <p>Book your seat, instantly confirmed</p>
+    </div>
+  </div>
+  <div class="stats-row">
+    <div class="stat"><div class="num" id="statConfirmed">—</div><div class="label">Booked</div></div>
+    <div class="stat"><div class="num" id="statRemaining">—</div><div class="label">Seats left</div></div>
+    <div class="stat"><div class="num" id="statRoutes">—</div><div class="label">Routes</div></div>
+  </div>
+</header>
+
+<main>
+  <div class="section-title">Choose a route</div>
+  <div class="routes-grid" id="routesGrid">
+    <div class="empty-state">Loading routes…</div>
+  </div>
+
+  <div class="booking-panel" id="bookingPanel">
+    <div class="booking-panel-head">
+      <h2 id="panelRouteTitle">Select your seat</h2>
+      <div class="legend">
+        <span><span class="legend-dot available"></span> Available</span>
+        <span><span class="legend-dot selected"></span> Selected</span>
+        <span><span class="legend-dot booked"></span> Booked</span>
+      </div>
+    </div>
+
+    <div class="bus-frame">
+      <div class="seat-grid" id="seatGrid"></div>
+    </div>
+
+    <div class="booking-form">
+      <div class="field">
+        <label>Passenger name</label>
+        <input type="text" id="passengerName" placeholder="Ram Jethani" />
+      </div>
+      <div class="field">
+        <label>Email (for confirmation)</label>
+        <input type="email" id="passengerEmail" placeholder="ram@example.com" />
+      </div>
+      <button class="confirm-btn" id="confirmBtn" disabled>Select a seat first</button>
+    </div>
+
+    <div class="result-banner" id="resultBanner">
+      <div class="result-icon" id="resultIcon"></div>
+      <div class="result-text">
+        <strong id="resultTitle"></strong>
+        <span id="resultDetail"></span>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  CodeAlpha Cloud Computing Internship — Task 3: Cloud-Based Bus Pass System
+</footer>
+
+<div class="credit-badge">Built by <strong>Ram Jethani</strong></div>
+
+<script>
+  const API_BASE = "http://localhost:8000";
+
+  let currentRoute = null;
+  let selectedSeat = null;
+
+  // 2-aisle-2 seat layout: columns are [seat, seat, gap, seat, seat]
+  const COLS_PER_ROW = 5;
+  const SEATS_PER_ROW = 4; // excluding the aisle gap
+
+  function escapeHtml(str){
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function fmtTime(iso){
+    const d = new Date(iso);
+    return d.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+
+  async function refreshStats(){
+    try{
+      const res = await fetch(`${API_BASE}/api/bookings/stats`);
+      const s = await res.json();
+      document.getElementById("statConfirmed").textContent = s.total_confirmed_bookings;
+      document.getElementById("statRemaining").textContent = s.seats_remaining_across_routes;
+      document.getElementById("statRoutes").textContent = s.total_routes;
+    }catch(e){ console.warn("Stats unavailable — is the backend running?", e); }
+  }
+
+  async function loadRoutes(){
+    try{
+      const res = await fetch(`${API_BASE}/api/routes`);
+      const routes = await res.json();
+
+      if(routes.length === 0){
+        document.getElementById("routesGrid").innerHTML =
+          `<div class="empty-state">No routes yet — run <code>python seed_demo_data.py</code> to create some.</div>`;
+        return;
+      }
+
+      document.getElementById("routesGrid").innerHTML = routes.map(r => `
+        <div class="route-card" data-route-id="${r.id}">
+          <div class="route-path">${escapeHtml(r.origin)} <span class="arrow">→</span> ${escapeHtml(r.destination)}</div>
+          <div class="route-meta">
+            <div>
+              <div class="route-time">${fmtTime(r.departure_time)}</div>
+              <div class="route-operator">${escapeHtml(r.operator_name)}</div>
+            </div>
+            <div class="route-price">Rs ${Number(r.price).toLocaleString()}</div>
+          </div>
+        </div>
+      `).join("");
+
+      document.querySelectorAll(".route-card").forEach(card => {
+        card.addEventListener("click", () => selectRoute(card.dataset.routeId, routes));
+      });
+    }catch(e){
+      document.getElementById("routesGrid").innerHTML =
+        `<div class="empty-state">Can't reach the API at ${API_BASE}. Is the backend running?</div>`;
+    }
+  }
+
+  async function selectRoute(routeId, routes){
+    document.querySelectorAll(".route-card").forEach(c => c.classList.toggle("selected", c.dataset.routeId === routeId));
+
+    const route = routes.find(r => r.id === routeId);
+    currentRoute = route;
+    selectedSeat = null;
+
+    document.getElementById("panelRouteTitle").textContent = `${route.origin} → ${route.destination} — pick your seat`;
+    document.getElementById("bookingPanel").classList.add("show");
+    document.getElementById("resultBanner").classList.remove("show");
+    updateConfirmButton();
+
+    await renderSeatMap(routeId, route.total_seats);
+  }
+
+  async function renderSeatMap(routeId, totalSeats){
+    const res = await fetch(`${API_BASE}/api/routes/${routeId}/seat-map`);
+    const data = await res.json();
+    const bookedSet = new Set(data.booked_seats);
+
+    const grid = document.getElementById("seatGrid");
+    grid.innerHTML = "";
+
+    let seatNum = 1;
+    const rows = Math.ceil(totalSeats / SEATS_PER_ROW);
+
+    for(let row = 0; row < rows; row++){
+      for(let col = 0; col < COLS_PER_ROW; col++){
+        if(col === 2){
+          // aisle gap
+          const gap = document.createElement("div");
+          gap.className = "seat aisle-gap";
+          grid.appendChild(gap);
+          continue;
+        }
+        if(seatNum > totalSeats) continue;
+
+        const seatEl = document.createElement("div");
+        const thisSeat = seatNum;
+        seatEl.className = "seat" + (bookedSet.has(thisSeat) ? " booked" : "");
+        seatEl.textContent = thisSeat;
+        seatEl.dataset.seat = thisSeat;
+
+        if(!bookedSet.has(thisSeat)){
+          seatEl.addEventListener("click", () => selectSeat(thisSeat));
+        }
+        grid.appendChild(seatEl);
+        seatNum++;
+      }
+    }
+  }
+
+  function selectSeat(seatNumber){
+    selectedSeat = seatNumber;
+    document.querySelectorAll(".seat").forEach(el => {
+      el.classList.toggle("selected", Number(el.dataset.seat) === seatNumber);
+    });
+    updateConfirmButton();
+  }
+
+  function updateConfirmButton(){
+    const btn = document.getElementById("confirmBtn");
+    if(selectedSeat === null){
+      btn.disabled = true;
+      btn.textContent = "Select a seat first";
+    } else {
+      btn.disabled = false;
+      btn.textContent = `Confirm seat ${selectedSeat}`;
+    }
+  }
+
+  document.getElementById("confirmBtn").addEventListener("click", async () => {
+    const name = document.getElementById("passengerName").value.trim();
+    const email = document.getElementById("passengerEmail").value.trim();
+    if(!name){
+      alert("Please enter a passenger name.");
+      return;
+    }
+    if(!email){
+      alert("Please enter an email address for the confirmation.");
+      return;
+    }
+    if(!currentRoute || selectedSeat === null) return;
+
+    const btn = document.getElementById("confirmBtn");
+    btn.disabled = true;
+    btn.textContent = "Booking…";
+
+    const banner = document.getElementById("resultBanner");
+    const icon = document.getElementById("resultIcon");
+    const title = document.getElementById("resultTitle");
+    const detail = document.getElementById("resultDetail");
+
+    try{
+      const res = await fetch(`${API_BASE}/api/bookings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ route_id: currentRoute.id, seat_number: selectedSeat, passenger_name: name, passenger_email: email }),
+      });
+      const result = await res.json();
+
+      if(res.ok){
+        icon.textContent = "✓";
+        title.textContent = `Booked! Reference: ${result.booking_reference}`;
+        const emailNote = result.email_sent
+          ? `Confirmation emailed to ${email}.`
+          : `Email not sent (SMTP not configured) — reference saved above.`;
+        detail.textContent = `Seat ${result.seat_number} · Rs ${Number(result.price_paid).toLocaleString()} · ${name} · ${emailNote}`;
+        banner.className = "result-banner show ok";
+        selectedSeat = null;
+        document.getElementById("passengerName").value = "";
+        document.getElementById("passengerEmail").value = "";
+        await renderSeatMap(currentRoute.id, currentRoute.total_seats);
+      } else {
+        icon.textContent = "!";
+        title.textContent = res.status === 409 ? "That seat was just taken" : "Booking failed";
+        detail.textContent = result.detail || "Please try a different seat.";
+        banner.className = "result-banner show error";
+        if(res.status === 409){
+          await renderSeatMap(currentRoute.id, currentRoute.total_seats);
+        }
+      }
+      await refreshStats();
+    }catch(err){
+      icon.textContent = "!";
+      title.textContent = "Connection error";
+      detail.textContent = `Could not reach ${API_BASE}. Is the backend running?`;
+      banner.className = "result-banner show error";
+    }finally{
+      updateConfirmButton();
+    }
+  });
+
+  loadRoutes();
+  refreshStats();
+  setInterval(refreshStats, 8000);
+</script>
+
+</body>
+</html>
