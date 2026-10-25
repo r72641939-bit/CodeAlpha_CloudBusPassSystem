@@ -8,11 +8,14 @@ Run locally with:
     uvicorn app.main:app --reload
 
 Interactive API docs available at /docs once running.
+The booking page itself is served at "/".
 """
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 
 from app.config import settings
 from app.database import Base, engine
@@ -45,6 +48,17 @@ app.add_middleware(
 
 app.include_router(routes.router)
 app.include_router(bookings.router)
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+@app.get("/", include_in_schema=False)
+def frontend():
+    """Serve the booking page (same domain as the API, so no CORS needed)."""
+    index = STATIC_DIR / "index.html"
+    if not index.exists():
+        return HTMLResponse("<h1>Frontend file not found</h1>", status_code=404)
+    return HTMLResponse(index.read_text(encoding="utf-8"))
 
 
 @app.get("/api/health", tags=["health"], summary="Health check")
