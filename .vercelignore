@@ -1,0 +1,10 @@
+.git
+.github
+.env
+backend/.env
+backend/tests
+backend/Dockerfile
+backend/.dockerignore
+docker-compose.yml
+**/__pycache__
+.pytest_cache

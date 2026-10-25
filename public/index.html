@@ -210,7 +210,11 @@
 <div class="credit-badge">Built by <strong>Ram Jethani</strong></div>
 
 <script>
-  const API_BASE = "http://localhost:8000";
+  // Local development (opening this file, or any localhost page) talks to the
+  // API on localhost:8000. When deployed on Vercel the frontend and API share
+  // one domain, so requests are same-origin: an empty base means "/api/...".
+  const IS_LOCAL = ["localhost", "127.0.0.1", ""].includes(location.hostname);
+  const API_BASE = IS_LOCAL ? "http://localhost:8000" : "";
 
   let currentRoute = null;
   let selectedSeat = null;
@@ -269,7 +273,7 @@
       });
     }catch(e){
       document.getElementById("routesGrid").innerHTML =
-        `<div class="empty-state">Can't reach the API at ${API_BASE}. Is the backend running?</div>`;
+        `<div class="empty-state">Can't reach the API at ${API_BASE || location.origin}. Is the backend running?</div>`;
     }
   }
 
@@ -399,7 +403,7 @@
     }catch(err){
       icon.textContent = "!";
       title.textContent = "Connection error";
-      detail.textContent = `Could not reach ${API_BASE}. Is the backend running?`;
+      detail.textContent = `Could not reach ${API_BASE || location.origin}. Is the backend running?`;
       banner.className = "result-banner show error";
     }finally{
       updateConfirmButton();

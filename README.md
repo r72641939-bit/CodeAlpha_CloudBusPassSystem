@@ -72,6 +72,7 @@ Since real auto-scaling infrastructure is out of scope here, this section explai
 | Database | PostgreSQL + SQLAlchemy | Real row-level locking (`FOR UPDATE`) and partial unique indexes - both genuine Postgres features |
 | Frontend | Vanilla HTML/CSS/JS | Zero build tooling, animated seat-map interaction |
 | Testing | pytest | Unit tests (reference codes) + real concurrency integration tests against Postgres |
+| Hosting | Vercel (frontend + FastAPI function) + Neon/Supabase Postgres | Free tier, one domain, no card needed |
 | Containerization | Docker + Docker Compose | One-command local setup, no manual database installation needed |
 | CI/CD | GitHub Actions | Runs the real test suite (including the concurrency test) against a disposable Postgres database on every push |
 
@@ -104,8 +105,10 @@ CodeAlpha_CloudBusPassSystem/
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   └── .env.example
-├── frontend/
-│   └── index.html                   # Animated seat-map booking UI
+├── public/
+│   └── index.html                   # Animated seat-map booking UI (served by Vercel's CDN)
+├── main.py                           # Vercel entrypoint (exports the FastAPI app)
+├── requirements.txt                  # Slim runtime deps used by Vercel
 ├── docker-compose.yml                # One-command local stack: backend + Postgres
 └── README.md
 ```
@@ -162,7 +165,7 @@ Routes cover Karachi, Lahore, Islamabad, Peshawar, Hyderabad, Sukkur, and Multan
 
 ### 4. Frontend
 
-Open `frontend/index.html` in a browser. Pick a route, click a seat on the animated seat map, enter a name and email, and confirm - a booking reference and price confirmation animate in.
+Open `public/index.html` in a browser. Pick a route, click a seat on the animated seat map, enter a name and email, and confirm - a booking reference and price confirmation animate in.
 
 ## Alternative: run everything with Docker Compose
 
@@ -179,6 +182,36 @@ docker compose up --build
 
 This starts a real PostgreSQL container and the backend together, wires them to each other automatically, and waits for the database to actually be ready before starting the API - avoiding the classic "backend crashes because Postgres wasn't ready yet" race condition. API available at `http://localhost:8000` same as before. `seed_demo_data.py` and `pytest` both still work exactly the same way against this database - just run them from a normal terminal (outside the container) as in steps 3-4 above, since `docker-compose.yml` publishes Postgres on the standard `localhost:5432`.
 
+## Deployment (Vercel + Neon/Supabase) - all free
+
+Architecture: **one Vercel project** serves both the frontend (`public/index.html`, from Vercel's CDN) and the FastAPI backend (a Vercel Function, entrypoint `main.py`) on the **same domain**, talking to a managed **PostgreSQL** database (Neon or Supabase). Same domain means no CORS exposure at all.
+
+1. **Rotate secrets** if they were ever shared: reset your database password and create a new Gmail app password. Never commit `.env`.
+2. Push this repo to GitHub.
+3. On [vercel.com](https://vercel.com) (sign in with GitHub): **Add New -> Project**, import the repo, leave all build settings on defaults (Framework Preset: FastAPI/Other), and add these **Environment Variables** before deploying:
+
+   | Name | Value |
+   |---|---|
+   | `DATABASE_URL` | Your pooled Postgres URL (Neon pooled string, or Supabase *Transaction pooler* string). `postgresql://...` is fine. |
+   | `ADMIN_API_KEY` | A long random secret, e.g. output of `openssl rand -hex 32` |
+   | `ALLOWED_ORIGIN` | Your Vercel URL, e.g. `https://your-project.vercel.app` (only matters for cross-origin use; set it after the first deploy) |
+   | `SMTP_*` | Optional, only for confirmation emails |
+
+4. Click **Deploy**. Then check `https://<your-project>.vercel.app/api/health` and `/docs`.
+5. Open `https://<your-project>.vercel.app/` - the booking UI loads and calls `/api/...` on the same domain.
+6. Seed demo data from your own computer:
+   ```bash
+   cd backend
+   BASE_URL=https://<your-project>.vercel.app ADMIN_API_KEY=<your key> python seed_demo_data.py
+   ```
+
+**Admin endpoints** (`POST /api/routes`, `GET /api/bookings`, `POST /api/bookings/{id}/cancel`) require an `X-API-Key` header matching `ADMIN_API_KEY`. Passenger-facing endpoints stay open. If `ADMIN_API_KEY` is empty the check is skipped (local development only).
+
+**Notes**
+- Choose the Vercel Function region closest to your database (Project Settings -> Functions). Neon `us-east-2` pairs well with Vercel's default `iad1`.
+- If you see a Vercel login page instead of your API, turn off *Deployment Protection* for production (Project Settings -> Deployment Protection) or use your production domain.
+- Docker (`backend/Dockerfile`, `docker-compose.yml`) is kept for local development and works on any container host.
+
 ## CI/CD
 
 `.github/workflows/ci.yml` runs automatically on every push and pull request to `main`. It spins up a real, disposable PostgreSQL database as a GitHub-hosted service container (not a mock, not SQLite standing in for it) and runs the complete test suite against it - including the real 10-thread concurrency test with actual `SELECT ... FOR UPDATE` row locking, the same test proven to work locally above. A separate job confirms the Docker image actually builds. A green checkmark on commits in this repo means the tests genuinely ran and passed on a fresh database, not just that the code was written to look correct.
@@ -187,12 +220,12 @@ This starts a real PostgreSQL container and the backend together, wires them to 
 
 | Method | Endpoint | Description |
 |---|---|---|
-| POST | `/api/routes` | Create a route (admin utility, used by the seed script) |
+| POST | `/api/routes` | Create a route (admin, `X-API-Key`) |
 | GET | `/api/routes` | List all routes |
 | GET | `/api/routes/{id}/seat-map` | Get booked/available seats for a route |
 | POST | `/api/bookings` | Book a seat (concurrency-safe, server-priced) |
-| GET | `/api/bookings` | List all bookings |
-| POST | `/api/bookings/{id}/cancel` | Cancel a booking (frees the seat for rebooking) |
+| GET | `/api/bookings` | List all bookings (admin, `X-API-Key`) |
+| POST | `/api/bookings/{id}/cancel` | Cancel a booking (admin, `X-API-Key`) |
 | GET | `/api/bookings/stats` | Summary stats for the dashboard |
 
 Full schemas at `/docs`.

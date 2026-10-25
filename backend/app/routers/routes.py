@@ -9,12 +9,14 @@ from sqlalchemy.orm import Session
 from app.core.booking_engine import get_booked_seats
 from app.database import get_db
 from app.models import Route
+from app.security import require_admin
 from app.schemas import RouteIn, RouteOut, SeatMapOut
 
 router = APIRouter(prefix="/api/routes", tags=["routes"])
 
 
-@router.post("", response_model=RouteOut, summary="Create a new route (admin utility, used by the seed script)")
+@router.post("", response_model=RouteOut, dependencies=[Depends(require_admin)],
+             summary="Create a new route (admin only - needs X-API-Key)")
 def create_route(payload: RouteIn, db: Session = Depends(get_db)):
     route = Route(**payload.model_dump())
     db.add(route)

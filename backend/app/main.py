@@ -9,13 +9,19 @@ Run locally with:
 
 Interactive API docs available at /docs once running.
 """
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.config import settings
 from app.database import Base, engine
 from app.routers import routes, bookings
 
-Base.metadata.create_all(bind=engine)
+try:
+    Base.metadata.create_all(bind=engine)
+except Exception:  # keep the app importable so the real DB error shows up per-request
+    logging.getLogger(__name__).exception("Could not create database tables - check DATABASE_URL")
 
 app = FastAPI(
     title="Cloud-Based Bus Pass System",
@@ -31,9 +37,9 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=settings.allowed_origins,
+    allow_credentials=False,  # the API uses no cookies, so credentials are not needed
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -41,7 +47,7 @@ app.include_router(routes.router)
 app.include_router(bookings.router)
 
 
-@app.get("/", tags=["health"], summary="Health check")
+@app.get("/api/health", tags=["health"], summary="Health check")
 def root():
     return {
         "service": "Cloud-Based Bus Pass System",

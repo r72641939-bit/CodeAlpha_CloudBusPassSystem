@@ -12,6 +12,7 @@ from app.core.booking_engine import (
 )
 from app.database import get_db
 from app.models import Booking
+from app.security import require_admin
 from app.schemas import BookingIn, BookingOut, BookingStatsOut
 
 router = APIRouter(prefix="/api/bookings", tags=["bookings"])
@@ -37,12 +38,14 @@ def create_booking(payload: BookingIn, db: Session = Depends(get_db)):
     return booking
 
 
-@router.get("", response_model=List[BookingOut], summary="List all bookings")
+@router.get("", response_model=List[BookingOut], dependencies=[Depends(require_admin)],
+            summary="List all bookings (admin only - needs X-API-Key)")
 def list_bookings(db: Session = Depends(get_db)):
     return db.query(Booking).order_by(Booking.created_at.desc()).all()
 
 
-@router.post("/{booking_id}/cancel", response_model=BookingOut, summary="Cancel a booking (frees the seat)")
+@router.post("/{booking_id}/cancel", response_model=BookingOut, dependencies=[Depends(require_admin)],
+             summary="Cancel a booking (admin only - needs X-API-Key)")
 def cancel(booking_id: str, db: Session = Depends(get_db)):
     try:
         return cancel_booking(db, booking_id)

@@ -5,13 +5,18 @@ overselling race condition - to prove only one of them can ever succeed.
 
 Run this AFTER the server is up:
     python seed_demo_data.py
+
+To seed a deployed API instead of localhost:
+    BASE_URL=https://your-api.onrender.com ADMIN_API_KEY=your-key python seed_demo_data.py
 """
+import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 import httpx
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000").rstrip("/")
+ADMIN_HEADERS = {"X-API-Key": os.environ["ADMIN_API_KEY"]} if os.environ.get("ADMIN_API_KEY") else {}
 
 ROUTES = [
     {"origin": "Karachi", "destination": "Lahore", "hours_from_now": 6, "price": "2500.00", "total_seats": 12, "operator_name": "CloudBus Express"},
@@ -38,7 +43,7 @@ def seed_routes():
             "total_seats": r["total_seats"],
             "operator_name": r["operator_name"],
         }
-        res = httpx.post(f"{BASE_URL}/api/routes", json=payload, timeout=10)
+        res = httpx.post(f"{BASE_URL}/api/routes", json=payload, headers=ADMIN_HEADERS, timeout=30)
         if res.status_code == 200:
             route = res.json()
             created_ids.append(route["id"])
@@ -53,7 +58,7 @@ def book_normal_seat(route_id, seat_number, name, email):
     res = httpx.post(
         f"{BASE_URL}/api/bookings",
         json={"route_id": route_id, "seat_number": seat_number, "passenger_name": name, "passenger_email": email},
-        timeout=10,
+        timeout=30,
     )
     status = "CONFIRMED" if res.status_code == 200 else f"FAILED ({res.status_code})"
     email_note = ""
@@ -69,7 +74,7 @@ def attempt_book(route_id, seat_number, name):
     res = httpx.post(
         f"{BASE_URL}/api/bookings",
         json={"route_id": route_id, "seat_number": seat_number, "passenger_name": name, "passenger_email": email},
-        timeout=10,
+        timeout=30,
     )
     return res.status_code == 200
 
