@@ -27,10 +27,18 @@ class Settings(BaseSettings):
     smtp_port: int = 587
     smtp_username: str = ""
     smtp_password: str = ""
+
+    # Successful bookings allowed from one internet address per hour. Mobile
+    # networks share addresses, so raise this if real passengers are refused.
+    bookings_per_ip_per_hour: int = 10
     smtp_from_email: str = ""
     smtp_use_tls: bool = True
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # env_ignore_empty: a blank variable (e.g. SMTP_PORT="") falls back to the
+    # default instead of crashing the app at startup.
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", env_ignore_empty=True
+    )
 
     @field_validator("database_url", mode="before")
     @classmethod

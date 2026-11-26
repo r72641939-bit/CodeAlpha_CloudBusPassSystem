@@ -1,14 +1,12 @@
 """
-Short, human-readable booking reference codes (e.g. "CB-7X9K2M"),
-distinct from the internal UUID primary key - the kind of code a
-passenger would actually read off a ticket or SMS confirmation.
+Ticket IDs (100, 101, 102, ...), distinct from the internal UUID primary
+key - the number a passenger reads off a ticket.
 """
-import secrets
-import string
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-_ALPHABET = string.ascii_uppercase + string.digits
+from app.models import ticket_id_seq
 
 
-def generate_booking_reference() -> str:
-    suffix = "".join(secrets.choice(_ALPHABET) for _ in range(6))
-    return f"CB-{suffix}"
+def generate_booking_reference(db: Session) -> str:
+    return str(db.scalar(select(ticket_id_seq.next_value())))

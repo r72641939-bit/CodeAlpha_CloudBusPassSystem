@@ -23,12 +23,18 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    Column, String, Integer, Numeric, DateTime, Boolean, Enum, ForeignKey, Index
+    Column, String, Integer, Numeric, DateTime, Boolean, Enum, ForeignKey, Index,
+    Sequence,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.database import Base
+
+
+# Ticket IDs: 100, 101, 102, ... The database hands out each number once, even
+# when many bookings arrive together. create_all() creates it if it is missing.
+ticket_id_seq = Sequence("ticket_id_seq", start=100, metadata=Base.metadata)
 
 
 class BookingStatus(str, enum.Enum):
@@ -72,6 +78,15 @@ class Booking(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     route = relationship("Route", back_populates="bookings")
+
+
+class RateEvent(Base):
+    """One counted action by one caller. See app/core/rate_limit.py."""
+    __tablename__ = "rate_events"
+
+    id = Column(Integer, primary_key=True)
+    key = Column(String(80), nullable=False, index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 
 # Partial unique index: only one CONFIRMED booking may exist per

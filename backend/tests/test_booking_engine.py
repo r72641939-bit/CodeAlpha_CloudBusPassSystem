@@ -17,9 +17,18 @@ from decimal import Decimal
 
 import pytest
 
-from app.database import SessionLocal
+from app.database import Base, SessionLocal, engine
 from app.models import Route, Booking, BookingStatus
-from app.core.booking_engine import book_seat, cancel_booking, SeatUnavailableError, InvalidSeatError
+from app.core.booking_engine import (
+    book_seat, cancel_booking, SeatUnavailableError, InvalidSeatError,
+    RouteDepartedError, TooManyBookingsError, MAX_BOOKINGS_PER_EMAIL_PER_HOUR,
+)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def database_tables():
+    """A fresh database (as in CI) has no tables or ticket sequence yet."""
+    Base.metadata.create_all(bind=engine)
 
 
 @pytest.fixture
@@ -54,6 +63,7 @@ def test_route(db_session):
 def test_booking_a_seat_succeeds(db_session, test_route):
     booking = book_seat(db_session, test_route.id, seat_number=1, passenger_name="Ram Jethani", passenger_email="ram@example.com")
     assert booking.seat_number == 1
+    assert int(booking.booking_reference) >= 100
     assert booking.status == BookingStatus.CONFIRMED
 
 
@@ -82,6 +92,20 @@ def test_cancelling_a_booking_frees_the_seat_for_rebooking(db_session, test_rout
     # Should now succeed - the partial unique index only covers CONFIRMED bookings.
     rebooking = book_seat(db_session, test_route.id, seat_number=4, passenger_name="New Passenger", passenger_email="new@example.com")
     assert rebooking.status == BookingStatus.CONFIRMED
+
+
+def test_departed_bus_cannot_be_booked(db_session, test_route):
+    test_route.departure_time = datetime.utcnow() - timedelta(minutes=1)
+    db_session.commit()
+    with pytest.raises(RouteDepartedError):
+        book_seat(db_session, test_route.id, seat_number=1, passenger_name="Late", passenger_email="late@example.com")
+
+
+def test_one_email_cannot_take_unlimited_seats(db_session, test_route):
+    for seat in range(1, MAX_BOOKINGS_PER_EMAIL_PER_HOUR + 1):
+        book_seat(db_session, test_route.id, seat_number=seat, passenger_name="Hoarder", passenger_email="hoard@example.com")
+    with pytest.raises(TooManyBookingsError):
+        book_seat(db_session, test_route.id, seat_number=9, passenger_name="Hoarder", passenger_email="HOARD@example.com")
 
 
 def test_concurrent_booking_attempts_only_one_wins(test_route):

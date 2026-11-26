@@ -1,18 +1,17 @@
-# Continuous Integration for the Cloud-Based Bus Pass System.
+# CI/CD for the Cloud-Based Bus Pass System.
 #
-# Runs on every push and pull request against main:
-#   1. Spins up a REAL, disposable PostgreSQL database (a GitHub-hosted
-#      service container - not mocked, not SQLite standing in for it).
-#   2. Installs dependencies and runs the full test suite against it,
-#      including the actual 10-thread concurrency test with real
-#      `SELECT ... FOR UPDATE` row locking - the same test that proved
-#      seat-booking safety when run locally.
-#   3. Separately verifies the Docker image actually builds.
+# Every pull request and push to main:
+#   1. lint    - catches syntax errors and undefined names
+#   2. test    - full test suite against a real PostgreSQL service,
+#                including the 500-person rush on one seat
+#   3. docker  - builds the image, starts the Compose stack and checks it
+# Pushes to main, only after all three pass:
+#   4. publish - pushes the image to GitHub Container Registry
 #
-# A green checkmark on this repo means the tests genuinely ran and
-# passed on a fresh database, not just that the code looks right.
+# The website itself is deployed by Vercel's GitHub integration. To stop
+# untested code reaching it, protect the main branch and require checks 1-3.
 
-name: CI
+name: CI/CD
 
 on:
   push:
@@ -20,9 +19,28 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "ruff>=0.5,<1"
+      - run: ruff check --isolated --select F,E9 backend main.py
+
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     services:
       postgres:
@@ -43,28 +61,60 @@ jobs:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/bus_pass_db
 
     steps:
-      - name: Check out the repo
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: Install dependencies
         working-directory: backend
         run: pip install -r requirements.txt
-
       - name: Run the full test suite
         working-directory: backend
         run: pytest tests/ -v
+      - name: Check the Vercel entrypoint with its own requirements
+        run: |
+          python -m venv /tmp/vercel
+          /tmp/vercel/bin/pip install -q -r requirements.txt
+          /tmp/vercel/bin/python -c "from main import app; print(app.title)"
 
-  docker-build:
+  docker:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - name: Check out the repo
-        uses: actions/checkout@v4
-
-      - name: Build the Docker image
+      - uses: actions/checkout@v4
+      - name: Build and start the stack
+        run: docker compose up --build --detach --wait --wait-timeout 120
+      - name: Check the running app
+        run: |
+          curl --fail --silent --show-error http://localhost:8000/api/health/db
+          curl --fail --silent --show-error --output /dev/null http://localhost:8000/
+          curl --fail --silent --show-error --output /dev/null http://localhost:8000/staff
+      - name: Add departures, then send 500 people after one seat
         working-directory: backend
-        run: docker build -t cloudbus-backend .
+        run: |
+          python3 add_departures.py
+          python3 stress_test.py
+      - name: Show logs if something failed
+        if: failure()
+        run: docker compose logs --no-color --tail 200
+      - name: Stop the stack
+        if: always()
+        run: docker compose down --volumes
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [lint, test, docker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build and push the image
+        run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/cloudbus-backend"
+          docker build -t "$IMAGE:latest" -t "$IMAGE:$GITHUB_SHA" backend
+          docker push --all-tags "$IMAGE"

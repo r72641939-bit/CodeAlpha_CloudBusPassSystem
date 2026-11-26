@@ -1,6 +1,7 @@
 """
 Route browsing and seat-map endpoints.
 """
+import uuid
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -31,7 +32,7 @@ def list_routes(db: Session = Depends(get_db)):
 
 
 @router.get("/{route_id}/seat-map", response_model=SeatMapOut, summary="Get seat availability for a route")
-def get_seat_map(route_id: str, db: Session = Depends(get_db)):
+def get_seat_map(route_id: uuid.UUID, db: Session = Depends(get_db)):
     route = db.get(Route, route_id)
     if route is None:
         raise HTTPException(status_code=404, detail="Route not found.")

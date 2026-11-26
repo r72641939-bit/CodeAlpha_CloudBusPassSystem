@@ -1,19 +1,26 @@
 """
-Unit tests for app.core.reference - pure function, no DB required.
+Unit tests for ticket IDs - no database server required.
 """
-import re
+from sqlalchemy.dialects import postgresql
 
 from app.core.reference import generate_booking_reference
+from app.models import ticket_id_seq
 
 
-def test_reference_has_correct_format():
-    ref = generate_booking_reference()
-    assert re.match(r"^CB-[A-Z0-9]{6}$", ref)
+class FakeSession:
+    def __init__(self):
+        self.statements = []
+
+    def scalar(self, statement):
+        self.statements.append(str(statement.compile(dialect=postgresql.dialect())))
+        return 100
 
 
-def test_references_are_unique_across_many_calls():
-    refs = {generate_booking_reference() for _ in range(1000)}
-    # With 36^6 possible suffixes, 1000 draws colliding is astronomically
-    # unlikely - this is really checking the generator isn't broken
-    # (e.g. accidentally deterministic).
-    assert len(refs) == 1000
+def test_ticket_id_is_a_plain_number_from_the_sequence():
+    session = FakeSession()
+    assert generate_booking_reference(session) == "100"
+    assert "nextval" in session.statements[0]
+
+
+def test_numbering_starts_at_100():
+    assert ticket_id_seq.start == 100

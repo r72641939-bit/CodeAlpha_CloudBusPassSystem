@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>CloudBus staff</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}
+body{margin:0;background:#f3f6fa;color:#111c2e;font:400 16px/1.5 'Barlow',system-ui,sans-serif}
+header{background:#0e2341;color:#fff}
+.wrap{max-width:1040px;margin:0 auto;padding:0 20px}
+header .wrap{display:flex;justify-content:space-between;align-items:center;min-height:64px;gap:12px}
+h1{font-size:1.25rem;margin:0}h2{font-size:1.15rem;margin:0 0 14px}
+.panel{background:#fff;border:1px solid #dde4ee;border-radius:12px;padding:20px;margin-top:20px}
+label{display:block;font-weight:600;font-size:.92rem;margin-bottom:4px}
+input{width:100%;font:inherit;border:1.5px solid #c3cedd;border-radius:8px;padding:10px 12px;background:#fff}
+button{font:inherit;font-weight:600;min-height:44px;border:0;border-radius:8px;padding:9px 18px;background:#1b5fd9;color:#fff;cursor:pointer}
+button:disabled{background:#dbe1ea;color:#55637a;cursor:default}
+button.plain{background:#fff;color:#111c2e;border:1.5px solid #c3cedd}
+:focus-visible{outline:2px solid #1b5fd9;outline-offset:2px}
+.row{display:flex;gap:10px;align-items:end;flex-wrap:wrap}.row > div{flex:1;min-width:200px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:14px}
+.table{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.93rem;margin-top:14px}
+th,td{text-align:left;padding:10px 12px 10px 0;border-bottom:1px solid #dde4ee;vertical-align:top}
+th{color:#56657a;font-weight:600}
+td small{display:block;color:#56657a}
+#message{margin-top:20px;padding:11px 14px;border-radius:8px;background:#fff5de;border:1px solid #ffd480}
+main{padding-bottom:48px}
+</style>
+</head>
+<body>
+<header><div class="wrap"><h1>CloudBus staff</h1><button class="plain" id="signOut" type="button" hidden>Sign out</button></div></header>
+<main class="wrap">
+  <p id="message" role="status" hidden></p>
+  <form class="panel row" id="signIn">
+    <div><label for="key">Admin key</label><input id="key" type="password" autocomplete="current-password" required></div>
+    <button type="submit">Sign in</button>
+  </form>
+  <div id="desk" hidden>
+    <section class="panel">
+      <h2>Bookings</h2>
+      <form class="row" id="search">
+        <div><label for="q">Ticket ID, name or email</label><input id="q" maxlength="100"></div>
+        <button type="submit">Search</button>
+      </form>
+      <div class="table"><table>
+        <thead><tr><th>Ticket</th><th>Passenger</th><th>Trip (Pakistan time)</th><th>Seat</th><th>Fare</th><th>Status</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table></div>
+    </section>
+    <form class="panel" id="add">
+      <h2>Add a departure</h2>
+      <div class="grid">
+        <div><label for="origin">From</label><input id="origin" required maxlength="100"></div>
+        <div><label for="destination">To</label><input id="destination" required maxlength="100"></div>
+        <div><label for="when">Departure (Pakistan time)</label><input id="when" type="datetime-local" required></div>
+        <div><label for="price">Fare (Rs)</label><input id="price" type="number" min="1" step="0.01" required></div>
+        <div><label for="seats">Seats</label><input id="seats" type="number" min="1" max="200" value="40" required></div>
+      </div>
+      <button type="submit">Add departure</button>
+    </form>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const API = ["localhost", "127.0.0.1", ""].includes(location.hostname) ? "http://localhost:8000" : "";
+let key = "";
+try { key = sessionStorage.getItem("cloudbus.staff") || ""; } catch {}
+
+const say = text => { $("message").textContent = text; $("message").hidden = !text; };
+async function api(path, options = {}) {
+  const res = await fetch(API + path, { cache: "no-store", ...options, headers: { "Content-Type": "application/json", "X-API-Key": key } });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const err = new Error(typeof data?.detail === "string" ? data.detail : "The request failed. Check the details and try again.");
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+function signedIn(yes) {
+  $("desk").hidden = $("signOut").hidden = !yes;
+  $("signIn").hidden = yes;
+}
+function signOut(text = "") {
+  key = "";
+  try { sessionStorage.removeItem("cloudbus.staff"); } catch {}
+  $("rows").textContent = "";
+  signedIn(false);
+  say(text);
+}
+const fail = err => err.status === 401 ? signOut("That admin key was not accepted.") : say(err.message);
+const when = iso => new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Karachi", dateStyle: "medium", timeStyle: "short" }).format(new Date(iso.endsWith("Z") ? iso : iso + "Z"));
+
+// Passenger text is added with textContent, never as HTML.
+function cell(row, main, extra) {
+  const td = row.insertCell();
+  td.textContent = main;
+  if (extra) { const s = document.createElement("small"); s.textContent = extra; td.append(s); }
+  return td;
+}
+async function load() {
+  const list = await api("/api/bookings/staff?q=" + encodeURIComponent($("q").value.trim()));
+  signedIn(true);
+  $("rows").textContent = "";
+  for (const b of list) {
+    const row = $("rows").insertRow();
+    cell(row, b.booking_reference);
+    cell(row, b.passenger_name, b.passenger_email);
+    cell(row, `${b.origin} to ${b.destination}`, when(b.departure_time));
+    cell(row, b.seat_number);
+    cell(row, "Rs " + Number(b.price_paid).toLocaleString("en-PK"));
+    const status = cell(row, "");
+    if (b.status !== "confirmed") { status.textContent = "Cancelled"; continue; }
+    const button = document.createElement("button");
+    button.className = "plain"; button.type = "button"; button.textContent = "Cancel";
+    button.onclick = async () => {
+      if (!window.confirm(`Cancel ticket ${b.booking_reference} for ${b.passenger_name}?`)) return;
+      button.disabled = true;
+      try { await api(`/api/bookings/${b.id}/cancel`, { method: "POST" }); say(`Ticket ${b.booking_reference} cancelled.`); await load(); }
+      catch (err) { button.disabled = false; fail(err); }
+    };
+    status.append(button);
+  }
+  if (!list.length) { const td = $("rows").insertRow().insertCell(); td.colSpan = 6; td.textContent = "No bookings found."; }
+}
+$("signIn").onsubmit = async e => {
+  e.preventDefault();
+  key = $("key").value.trim();
+  say("");
+  try { await load(); try { sessionStorage.setItem("cloudbus.staff", key); } catch {} $("key").value = ""; }
+  catch (err) { fail(err); }
+};
+$("search").onsubmit = e => { e.preventDefault(); say(""); load().catch(fail); };
+$("signOut").onclick = () => signOut();
+$("add").onsubmit = async e => {
+  e.preventDefault();
+  const departure = new Date($("when").value + ":00+05:00");
+  if (!(departure > new Date())) return say("Choose a departure time in the future.");
+  const button = e.submitter;
+  button.disabled = true;
+  try {
+    await api("/api/routes", { method: "POST", body: JSON.stringify({
+      origin: $("origin").value.trim(), destination: $("destination").value.trim(),
+      departure_time: departure.toISOString().slice(0, 19), price: $("price").value,
+      total_seats: Number($("seats").value), operator_name: "CloudBus Express" }) });
+    $("add").reset();
+    say("Departure added.");
+  } catch (err) { fail(err); }
+  finally { button.disabled = false; }
+};
+if (key) load().catch(fail);
+</script>
+</body>
+</html>
