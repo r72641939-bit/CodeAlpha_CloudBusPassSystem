@@ -6,7 +6,9 @@ from datetime import datetime
 from decimal import Decimal
 from typing import List
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+from app.core.validation import MAX_NAME_LENGTH, clean_passenger_name
 
 
 class RouteIn(BaseModel):
@@ -38,10 +40,15 @@ class SeatMapOut(BaseModel):
 class BookingIn(BaseModel):
     route_id: uuid.UUID
     seat_number: int = Field(gt=0)
-    passenger_name: str = Field(min_length=1, max_length=255)
+    passenger_name: str = Field(min_length=1, max_length=MAX_NAME_LENGTH)
     passenger_email: EmailStr
     # Note: no `price` field here on purpose - price is never accepted
     # from the client. See app/core/booking_engine.py.
+
+    @field_validator("passenger_name")
+    @classmethod
+    def _safe_name(cls, value: str) -> str:
+        return clean_passenger_name(value)
 
 
 class BookingOut(BaseModel):
@@ -57,6 +64,24 @@ class BookingOut(BaseModel):
     status: str
     email_sent: bool
     created_at: datetime
+
+
+class SelfCancelIn(BaseModel):
+    ticket_id: str = Field(min_length=1, max_length=12)
+    passenger_email: EmailStr
+
+
+class SelfCancelOut(BaseModel):
+    ticket_id: str
+    seat_number: int
+    origin: str
+    destination: str
+
+
+class StaffBookingOut(BookingOut):
+    origin: str
+    destination: str
+    departure_time: datetime
 
 
 class BookingStatsOut(BaseModel):

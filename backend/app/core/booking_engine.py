@@ -25,9 +25,10 @@ requirement. Two real, testable guarantees:
    (see BookingIn in schemas.py). This makes client-side price
    tampering structurally impossible, not just "checked for."
 """
+from datetime import datetime, timedelta
 from typing import List
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -48,6 +49,18 @@ class SeatUnavailableError(Exception):
     pass
 
 
+class RouteDepartedError(Exception):
+    pass
+
+
+class TooManyBookingsError(Exception):
+    pass
+
+
+# One email address can hold this many bookings made within an hour.
+MAX_BOOKINGS_PER_EMAIL_PER_HOUR = 5
+
+
 def get_booked_seats(db: Session, route_id) -> List[int]:
     rows = db.execute(
         select(Booking.seat_number).where(
@@ -58,30 +71,96 @@ def get_booked_seats(db: Session, route_id) -> List[int]:
     return sorted(r[0] for r in rows)
 
 
-def book_seat(db: Session, route_id, seat_number: int, passenger_name: str, passenger_email: str) -> Booking:
-    # Lock the route row - serializes concurrent booking attempts for
-    # this specific route until each transaction commits or rolls back.
-    route = db.execute(
-        select(Route).where(Route.id == route_id).with_for_update()
-    ).scalar_one_or_none()
-
-    if route is None:
-        raise RouteNotFoundError(f"Route {route_id} does not exist.")
-
-    if seat_number < 1 or seat_number > route.total_seats:
-        raise InvalidSeatError(
-            f"Seat {seat_number} is out of range for this route (1-{route.total_seats})."
-        )
-
-    already_booked = db.execute(
-        select(Booking).where(
+def _is_booked(db: Session, route_id, seat_number: int) -> bool:
+    return db.execute(
+        select(Booking.id).where(
             Booking.route_id == route_id,
             Booking.seat_number == seat_number,
             Booking.status == BookingStatus.CONFIRMED,
         )
+    ).first() is not None
+
+
+def _check_request(db: Session, route, route_id, seat_number: int, passenger_email: str) -> None:
+    """Everything that can be refused without locking anything."""
+    if route is None:
+        raise RouteNotFoundError(f"Route {route_id} does not exist.")
+    if seat_number < 1 or seat_number > route.total_seats:
+        raise InvalidSeatError(
+            f"Seat {seat_number} is out of range for this route (1-{route.total_seats})."
+        )
+    if route.departure_time <= datetime.utcnow():  # stored in UTC
+        raise RouteDepartedError("This bus has already left. Please choose another departure.")
+    # Taken seats are refused here, so a rush on one seat doesn't queue on the lock.
+    if _is_booked(db, route_id, seat_number):
+        raise SeatUnavailableError(f"Seat {seat_number} is already booked on this route.")
+    recent = db.scalar(
+        select(func.count()).select_from(Booking).where(
+            func.lower(Booking.passenger_email) == passenger_email.lower(),
+            Booking.status == BookingStatus.CONFIRMED,
+            Booking.created_at > datetime.utcnow() - timedelta(hours=1),
+        )
+    )
+    if recent >= MAX_BOOKINGS_PER_EMAIL_PER_HOUR:
+        raise TooManyBookingsError("This email has reached the booking limit. Please try again in an hour.")
+
+
+class BookingNotFoundError(Exception):
+    pass
+
+
+class CancelNotAllowedError(Exception):
+    pass
+
+
+# Passengers can cancel until this long before departure.
+CANCEL_CUTOFF = timedelta(hours=1)
+
+
+def cancel_own_booking(db: Session, ticket_id: str, passenger_email: str) -> Booking:
+    """Self-service cancellation: needs both the ticket ID and the email used."""
+    booking = db.execute(
+        select(Booking).where(
+            Booking.booking_reference == ticket_id.strip().upper(),
+            func.lower(Booking.passenger_email) == passenger_email.lower(),
+        ).with_for_update()
     ).scalar_one_or_none()
 
-    if already_booked is not None:
+    problem = None
+    if booking is None:
+        problem = BookingNotFoundError("No booking matches that ticket ID and email.")
+    elif booking.status == BookingStatus.CANCELLED:
+        problem = CancelNotAllowedError("This booking is already cancelled.")
+    elif booking.route.departure_time - datetime.utcnow() < CANCEL_CUTOFF:
+        problem = CancelNotAllowedError("Bookings can only be cancelled up to 1 hour before departure.")
+    if problem:
+        db.rollback()
+        raise problem
+
+    booking.status = BookingStatus.CANCELLED
+    db.commit()
+    db.refresh(booking)
+    return booking
+
+
+def book_seat(db: Session, route_id, seat_number: int, passenger_name: str, passenger_email: str) -> Booking:
+    route = db.execute(select(Route).where(Route.id == route_id)).scalar_one_or_none()
+    try:
+        _check_request(db, route, route_id, seat_number, passenger_email)
+    except Exception:
+        db.rollback()
+        raise
+
+    # Lock the route row - serializes concurrent booking attempts for
+    # this specific route until each transaction commits or rolls back.
+    route = db.execute(
+        select(Route).where(Route.id == route_id).with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one()
+
+    # Check again now that we hold the lock: someone may have just taken it.
+    if _is_booked(db, route_id, seat_number):
+        db.rollback()  # release the row lock at once
         raise SeatUnavailableError(f"Seat {seat_number} is already booked on this route.")
 
     booking = Booking(
@@ -89,7 +168,7 @@ def book_seat(db: Session, route_id, seat_number: int, passenger_name: str, pass
         seat_number=seat_number,
         passenger_name=passenger_name,
         passenger_email=passenger_email,
-        booking_reference=generate_booking_reference(),
+        booking_reference=generate_booking_reference(db),
         price_paid=route.price,  # server-side, never client-supplied
         status=BookingStatus.CONFIRMED,
     )
@@ -113,7 +192,10 @@ def book_seat(db: Session, route_id, seat_number: int, passenger_name: str, pass
         passenger_name=passenger_name,
         origin=route.origin,
         destination=route.destination,
-        departure_time_str=route.departure_time.strftime("%a, %d %b %Y at %I:%M %p"),
+        # Stored in UTC; Pakistan is UTC+5 all year.
+        departure_time_str=(route.departure_time + timedelta(hours=5)).strftime(
+            "%a, %d %b %Y at %I:%M %p (Pakistan time)"
+        ),
         seat_number=seat_number,
         price_paid=str(booking.price_paid),
         booking_reference=booking.booking_reference,
